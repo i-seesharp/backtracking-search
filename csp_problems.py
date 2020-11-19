@@ -1,6 +1,7 @@
 from csp import Constraint, Variable, CSP
 from constraints import *
 from backtracking import bt_search
+import numpy as np
 
 ##################################################################
 ### NQUEENS
@@ -335,135 +336,151 @@ def solve_planes(planes_problem, algo, allsolns,
 
     #BUILD your CSP here and store it in the varable csp
 
-    planes = planes_problem.planes # the actual planes: 'AC-1', 'AC-2', etc
-    flights = planes_problem.flights # flight codes 'AC001', 'AC002', etc
+    allVariables = [] 
+    allConstraints = []
+    
+     
+    increment = 1
+    
+    answer = []
+    noneFlights = 1
+    flights = planes_problem.flights
     maintenanceFlights = planes_problem.maintenance_flights
-    maintFreq = planes_problem.min_maintenance_frequency
-    planeVars = [] # list of planeVariables, DIFFERENT FROM PLANES
-    constraint_list = [] # list of constraints
+    mFrequency = planes_problem.min_maintenance_frequency
+     
     '''
-    create a variable for each plane "stop"
-    format: actualplanename.#
-    need to count how many flights each plane is able to fly to create each variable
-    for each "start" plane variable, the domain is the initial flight list
-    for other plane variables, the domain is the flightlist
     '''
-    noneCount = 1 # keep track of unique "none" flights
-
-    # 1. Assigned flights only 2. Initial flight
-    # both enforced through domains
-    # cycle through the planes
-    for p in planes:
-        # get number of flights this plane can fly
-        flightCount = len(planes_problem.can_fly(p))
-        # then create variables and domains
-        for i in range(flightCount):
-            name = "{}.{}".format(p, noneCount)
-            if i == 0: # if it's the first plane var
-                dom = list(planes_problem.can_start(p)) # domain is only the "can_start" flights
+    
+    constraintNameString = "C"
+    planes = planes_problem.planes 
+     
+    
+    for i in range(len(planes)):
+        currPlane = planes[i]
+        canFlyPlanes = planes_problem.can_fly(currPlane)
+        numFlights = len(canFlyPlanes)
+        
+        for j in range(numFlights):
+            name = str(currPlane)+"."+str(noneFlights)
+            if j > 0: 
+                currDomain = list(canFlyPlanes)
             else:
-                dom = list(planes_problem.can_fly(p)) # otherwise domain is the "can_fly" flights
-            # add unique "none" flight values to domain
-            dom.append("none.{}".format(noneCount))
-            planeVar = Variable(name, dom)
-            planeVars.append(planeVar)
-            noneCount += 1 # increment nonecounter
+                currDomain = list(planes_problem.can_start(currPlane)) # domain is only the "can_start" flights
+            valString = "none."+str(noneFlights)
+            currDomain = currDomain + [valString]
+            var = Variable(name, currDomain)
+            allVariables.append(var)
+            noneFlights = noneFlights + 1 
 
-    # 5. Everything must be scheduled once and only once - AllDiff + NValues
-    # AllDiff: everything is only scheduled once
-    # NValues: all flights have been scheduled
-    a = 1
-    constraint_list.extend([AllDiffConstraint("C{}".format(a), planeVars)])
-    a += 1
-    constraint_list.extend([NValuesConstraint("C{}".format(a), planeVars, flights, len(flights), 999999)])
-    a += 1
+    diffCounter = 1
+    allConstraints.extend([AllDiffConstraint(constraintNameString+str(diffCounter), allVariables)])
+    diffCounter = diffCounter + increment
+    allConstraints.extend([NValuesConstraint(constraintNameString+str(diffCounter), allVariables, flights, len(flights), np.inf)])
+    diffCounter = diffCounter + increment
 
-    # 4. Maintenance every K flights. If numflights = J < K, its satisfied
-    # NValues Constraint
-    # cycle through unique plane names
-    for plane in planes:
-        # from the planeVars, grab the variables that correspond to the unique plane chosen
-        match = [v for v in planeVars if plane in v.name()]
-        # we now need to iterate through match list by grabbing maintFreq amount of subsequent planeVars
-        subSequences = map(list, zip(*(match[i:] for i in range(maintFreq))))
-        if len(match) < maintFreq:
-            continue # if the max length of this plane's flight plan is < maintFreq
-                     # it doesn't need a constraint
-        # cycle through each subsequence
-        for sub in subSequences:
-            noneNames = []
-            # figure out the unique none names
-            for v in sub:
-                noneNames += ["none.{}".format(v.name().split('.')[1])]
-            # combine maintenanceFlights and none names into one list, required
-            required = maintenanceFlights + noneNames
-            # enforce NValues on the required values, lowerbound is 1
-            constraint_list.extend([NValuesConstraint("C{}".format(a), sub, required, 1, 99999)])
-            a += 1
+    noneString = "none"+"."
 
-    # 3. Sequence - Table Constraints
-    for plane in planes:
-        match = [v for v in planeVars if plane in v.name()] # match is a collection of variables whose name starts with
-                                                            # the current plane were looking at
-        for i in range(len(match) - 1):
-            first = match[i]
-            second = match[i + 1]
-            constraintTuples = []
-            firstnone = "none." + first.name().split('.')[1]
-            secondnone = "none." + second.name().split('.')[1]
 
-            narrowlist = []
-            if i == 0: # if it's the starting flight, then match[i] needs to start with one of the can_start flights
-                firstdomain = planes_problem.can_start(plane)
-            else: # otherwise, just get the domain of the first ones
+    for i in range(len(planes)):
+        foundVariables = []
+        for var in allVariables:
+            if planes[i] in var.name():
+                foundVariables.append(var)
+    
+        for variable_index in range(len(foundVariables[:-1])):
+            first = foundVariables[variable_index]
+            second = foundVariables[variable_index + 1]
+            cnstrBatch = []
+
+
+            
+            noneA = noneString + first.name().split('.')[1]
+            noneB = noneString + second.name().split('.')[1]
+
+            listOfCo = []
+            if variable_index == 0:
+                firstdomain = planes_problem.can_start(planes[i])
+            else: 
                 firstdomain = first.domain()
             for flight in firstdomain:
-                # from the list of can_follow, narrow the list down using can_follow tuple[0] = flight
-                narrowlist += [x for x in planes_problem.can_follow if x[0] == flight]
-            # at this point, we have narrowlist,
-            # work through the narrowlist, check the second flight domain with the second item in each tuple
-            # insert if domain holds
-            for n in narrowlist:
-                dest = n[1]
-                if dest in second.domain():
-                    constraintTuples += [[n[0], n[1]]]
-            # insert none flights as necessary
-            for flight in firstdomain:
-                constraintTuples += [[flight, secondnone]]
-            if i == 0: constraintTuples += [[firstnone, secondnone]]
-            scope = [first, second]
-            constraint_list.extend([TableConstraint("C{}".format(a), scope, constraintTuples)])
-        # if the plane can only ever fly one flight, then the table constraint is the domain itself, not necessary tbh
-        if len(match) == 1:
-            constraintTuples = []
-            first = match[0]
-            for flight in first.domain():
-                constraintTuples += [[flight]]
-            scope = [first]
-            constraint_list.extend([TableConstraint("C{}".format(a), scope, constraintTuples)])
-        a += 1
+                for follow in planes_problem.can_follow:
+                    if flight == follow[0]:
+                        listOfCo.append(follow)
 
-    csp = CSP("Planes", planeVars, constraint_list)
-    #invoke search with the passed parameters
+            for k in range(len(listOfCo)):
+                nextDomain = second.domain()
+                if listOfCo[k][1] in nextDomain:
+                    cnstrBatch.append([listOfCo[k][0], listOfCo[k][1]])
+            
+            for flight in firstdomain:
+                cnstrBatch.append([flight, noneB])
+            if variable_index == 0:
+                cnstrBatch.append([noneA, noneB])
+
+
+            scope = [first, second]
+            allConstraints.extend([TableConstraint(constraintNameString+str(diffCounter), scope, cnstrBatch)])
+        
+        if len(foundVariables) == 1:
+            cnstrBatch = []
+            first = foundVariables[0]
+            firstDomain = first.domain()
+            for flight in firstDomain:
+                cnstrBatch.append([flight])
+            scope = [first]
+            allConstraints.extend([TableConstraint(constraintNameString+str(diffCounter), scope, cnstrBatch)])
+        diffCounter = diffCounter + increment
+
+    for i in range(len(planes)):
+        
+        foundVariables = []
+        for var_index in range(len(allVariables)):
+            if planes[i] in allVariables[var_index].name():
+                foundVariables.append(allVariables[var_index])
+        
+        subSequences = map(list, zip(*(foundVariables[i:] for i in range(mFrequency))))
+        if len(foundVariables) < mFrequency:
+            continue 
+                     
+        for index in subSequences:
+            planesWithNone = []
+            
+            for var in index:
+                intermediateLst = var.name().split(".")
+                formattedString = "none."+str(intermediateLst[1])
+                planesWithNone.append(formattedString)
+    
+            currSequence = index
+            allConstraints = allConstraints + [NValuesConstraint(constraintNameString+str(diffCounter), currSequence, maintenanceFlights + planesWithNone, 1, np.inf)]
+            diffCounter = diffCounter + increment
+
+    csp = CSP("Planes", allVariables, allConstraints)
+
     solutions, num_nodes = bt_search(algo, csp, variableHeuristic, allsolns, trace)
-    #Convert each solution into a list of lists specifying a schedule
-    #for each plane in the format described above.
-    #then return a list containing all converted solutions
-    #(i.e., a list of lists of lists)
-    returnList = []
-    for sol in solutions:
-        subList = []
-        finalList = []
+
+    for i in range(len(solutions)):
+        temp = []
+        final = []
+
+        
         for plane in planes:
-            match = [x for x in sol if x[0].name().split('.')[0] == plane]
-            further = [x[1] for x in match]
-            subList.extend([plane])
-            subList.extend(further)
-            subList = [s for s in subList if "none" not in s]
-            finalList.extend([list(subList)])
-            del subList[:]
-        returnList += [list(finalList)]
-        #print returnList
-    return returnList
+            foundVariables = []
+            for var in solutions[i]:
+                if var[0].name().split(".")[0] == plane:
+                    foundVariables.append(var)
+
+                    
+            nextVal = [x[1] for x in foundVariables]
+            temp += [plane]
+            temp += nextVal
+            temp = [y for y in temp if (not "none" in y)]
+            final += [temp]
+            temp = []
+        answer += [final]
+        
+    #print("---------------------------")
+    #for lst in answer:
+        #print(lst)
+    return answer
 
 
