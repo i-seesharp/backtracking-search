@@ -173,6 +173,7 @@ def FC(unAssignedVars, csp, allSolutions, trace):
     #Implementing handling of the trace parameter is optional
     #but it can be useful for debugging
 
+    
     if unAssignedVars.empty():
         if trace:
             s = "{} Solution Found".format(csp.name())
@@ -181,38 +182,45 @@ def FC(unAssignedVars, csp, allSolutions, trace):
         for v in csp.variables():
             soln.append((v, v.getValue()))
         return [soln]
+    solutions = []
     bt_search.nodesExplored += 1
-    solns = []
-    nxtvar = unAssignedVars.extract()
+    
+    nextVariable = unAssignedVars.extract()
     if trace:
-        s= "==>Trying {}".format(nxtvar.name())
+        s= "==>Trying {}".format(nextVariable.name())
         print(s)
-    for val in nxtvar.curDomain():
+    for val in nextVariable.curDomain():
         if trace:
-            s = "==> {} = {}".format(nxtvar.name(), val)
+            s = "==> {} = {}".format(nextVariable.name(), val)
             print(s)
-        nxtvar.setValue(val)
-        noDWO = True
-        for cnstr in csp.constraintsOf(nxtvar):
-            if cnstr.numUnassigned() == 1:
-                if FCCheck(cnstr, nxtvar, val) == "DWO":
-                    noDWO = False
+        nextVariable.setValue(val)
+        #The following part is the only difference between FC and BT implementations
+        DWO = False
+        for constraint in csp.constraintsOf(nextVariable):
+            if constraint.numUnassigned() == 1:
+                DWOCheck = FCCheck(constraint, nextVariable, val) == "DWO"
+                if DWOCheck:
+                    DWO = True
                     if trace:
-                        s = "<==DWO occured\n"
+                        s = "<== DWO\n"
                         print(s)
                     break
-        if noDWO:
+        if not DWO:
             new_solns = FC(unAssignedVars, csp, allSolutions, trace)
             if new_solns:
-                solns.extend(new_solns)
-            if len(solns) > 0 and not allSolutions:
-                nxtvar.restoreValues(nxtvar, val)
+                solutions.extend(new_solns)
+            if len(solutions) > 0 and not allSolutions:
+                nextVariable.restoreValues(nextVariable, val)
                 break #don't bother with other values of nxtvar
                       #as we found a soln.
-        nxtvar.restoreValues(nxtvar, val)
-    nxtvar.unAssign()
-    unAssignedVars.insert(nxtvar)
-    return solns
+        nextVariable.restoreValues(nextVariable, val)
+
+    #nextVariable.setValue(None)    
+    nextVariable.unAssign()
+    unAssignedVars.insert(nextVariable)
+    #print(len(solutions))
+    return solutions
+    
 
 def GacEnforce(constraints, csp, reasonVar, reasonVal):
     '''Establish GAC on constraints by pruning values
@@ -222,17 +230,21 @@ def GacEnforce(constraints, csp, reasonVar, reasonVal):
     #your implementation for Question 3 goes in this function body
     #you must not change the function parameters
     #ensure that you return one of "OK" or "DWO"
-    while constraints:
-        constraint = constraints.pop()
-        for var in constraint.scope():
+    cnstrs = constraints[:]
+    while not (len(cnstrs) == 0):
+        cnstr = cnstrs.pop()
+        for var in cnstr.scope():
             for val in var.curDomain():
-                if not constraint.hasSupport(var, val):
-                    var.pruneValue(val, reasonVar=reasonVar, reasonVal=reasonVal)
+                if not cnstr.hasSupport(var, val):
+                    assignedVar = reasonVar
+                    assignedVal = reasonVal
+                    var.pruneValue(val, assignedVar, assignedVal)
                     if var.curDomainSize() == 0:
-                        return "DWO"
+                        return "DWO" #domain wipe out
                     for recheck in csp.constraintsOf(var):
-                        if recheck != constraint and recheck not in constraints:
-                            constraints.append(recheck)
+                        if recheck != cnstr and (not(recheck in cnstrs)):
+                            cnstrs = [recheck] + cnstrs
+                            #Implementing queue like behaviour adding infront 
     return "OK"
 
 def GAC(unAssignedVars, csp, allSolutions, trace):
@@ -255,39 +267,45 @@ def GAC(unAssignedVars, csp, allSolutions, trace):
     #implementing support for "trace" is optional, but it might
     #help you in debugging
 
+    
     if unAssignedVars.empty():
         if trace:
-            s = "{} Solution Found".format(csp.name())
-            print(s)
+            debugString = "{} Solution Found".format(csp.name())
+            print(debugString)
         soln = []
-        for v in csp.variables():
-            soln.append((v, v.getValue()))
+        for var in csp.variables():
+            soln.append((var, var.getValue()))
         return [soln]
+    
+    solutions = []
     bt_search.nodesExplored += 1
-    solns = []
-    nxtvar = unAssignedVars.extract()
+    nextVariable = unAssignedVars.extract()
+    
     if trace:
-        s = "==>Trying {}".format(nxtvar.name())
-        print(s)
-    for val in nxtvar.curDomain():
+        debugString = "==>Trying {}".format(nextVariable.name())
+        print(debugString)
+    for val in nextVariable.curDomain():
         if trace:
-            s = "==> {} = {}".format(nxtvar.name(), val)
-            print(s)
-        nxtvar.setValue(val)
-        noDWO = True
-        if GacEnforce(csp.constraintsOf(nxtvar),csp, nxtvar, val) == 'DWO':
-            noDWO = False
+            debugString = "==> {} = {}".format(nextVariable.name(), val)
+            print(debugString)
+        nextVariable.setValue(val)
+        DWO = False
+        DWOCondition = GacEnforce(csp.constraintsOf(nextVariable),csp, nextVariable, val) == 'DWO'
+        if DWOCondition:
+            DWO = True
             if trace:
-                s = "<==Domain wipe out\n"
-                print(s)
-        if noDWO:
-            new_solns = GAC(unAssignedVars, csp, allSolutions, trace)
-            if new_solns:
-                solns.extend(new_solns)
-            if len(solns) > 0 and not allSolutions:
-                Variable.restoreValues(nxtvar, val)
+                debugString = "<== DWO\n"
+                print(debugString)
+        if not DWO:
+            new_soln = GAC(unAssignedVars, csp, allSolutions, trace)
+            if new_soln:
+                solutions.extend(new_soln)
+            if not allSolutions and len(solutions) > 0:
+                Variable.restoreValues(nextVariable, val)
                 break
-        Variable.restoreValues(nxtvar, val)
-    nxtvar.unAssign()
-    unAssignedVars.insert(nxtvar)
-    return solns
+        Variable.restoreValues(nextVariable, val)
+        
+    nextVariable.unAssign()
+    unAssignedVars.insert(nextVariable)
+    #print(len(solutions))
+    return solutions

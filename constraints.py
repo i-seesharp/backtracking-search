@@ -120,16 +120,24 @@ class QueensTableConstraint(TableConstraint):
     #the existing function signatures.
     def __init__(self, name, qi, qj, i, j):
         self._name = "Queen_" + name
-        TableConstraint.__init__(self, name, [qi, qj], self.satisfyingAssignments(qi, qj, i, j))
+        satisfyingAssignments = self.getSatisfyingAssignments(qi, qj, i, j)
+        TableConstraint.__init__(self, name, [qi, qj], satisfyingAssignments)
 
-    def satisfyingAssignments(self, qi, qj, i, j):
-        satisfyingAssignments = []
-        for col_i in qi.domain():
-            for col_j in qj.domain():
-                # qi and qj are not on the same column and not diagonal
-                if(col_i != col_j and abs(i - j) != abs(col_i - col_j)):
-                    satisfyingAssignments.append([col_i, col_j])
-        return satisfyingAssignments
+    #Helper function to retreive satisfying assignments
+    def getSatisfyingAssignments(self, qi, qj, i, j):
+        iDomain = qi.domain()
+        jDomain = qj.domain()
+
+        outputAssignments = []
+        for col_i in iDomain:
+            for col_j in jDomain:
+                colCheck = (col_i != col_j)
+                diagCheck = abs(col_i - col_j) != abs(i - j)
+                cumulativeCheck = colCheck and diagCheck
+                if(cumulativeCheck):
+                    assignment = [col_i, col_j]
+                    outputAssignments.append(assignment)
+        return outputAssignments
 
 class NeqConstraint(Constraint):
     '''Neq constraint between two variables'''
@@ -273,6 +281,7 @@ class NValuesConstraint(Constraint):
     '''
 
     def __init__(self, name, scope, required_values, lower_bound, upper_bound):
+        
         Constraint.__init__(self,name, scope)
         self._name = "NValues_" + name
         self._required = required_values
@@ -280,14 +289,11 @@ class NValuesConstraint(Constraint):
         self._ub = upper_bound
 
     def check(self):
-        count = 0
+        trueValue = 0
         for var in self.scope():
             if var.isAssigned() and var.getValue() in self._required:
-                count += 1
-        if self._lb <= count <= self._ub:
-            return True
-        else:
-            return False
+                trueValue = trueValue + 1
+        return self._lb <= trueValue <= self._ub
 
     def hasSupport(self, var, val):
         '''check if var=val has an extension to an assignment of the
@@ -300,14 +306,16 @@ class NValuesConstraint(Constraint):
         if var not in self.scope():
             return True
 
-        def valsWithinBounds(l):
-            '''tests a list of assignments which are pairs (var,val)
-               to see if they can satisfy the all diff'''
-            count = sum([1 if value in self._required else 0 for (variable, value) in l])
-            return self._lb <= count <= self._ub
-
+        def boundCheck(l):
+            trueValue = 0
+            for local_var, local_val in l:
+                if local_val in self._required:
+                    trueValue = trueValue + 1
+            return self._lb <= trueValue <= self._ub
+                    
+        
         varsToAssign = self.scope()
         varsToAssign.remove(var)
-        x = findvals(varsToAssign, [(var, val)], valsWithinBounds)
-        return x
+        foundVals = findvals(varsToAssign, [(var, val)], boundCheck)
+        return foundVals
         
